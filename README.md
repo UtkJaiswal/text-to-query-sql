@@ -13,6 +13,20 @@
 - We execute this query in our database to fetch the results.
 
 
+### Create a virtual environment
+
+```bash
+python3 -m venv venv
+```
+
+
+### Activate the virtual environment
+
+```bash
+source venv/bin/activate
+```
+
+
 ### Installations
 
 ```bash
