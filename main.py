@@ -6,7 +6,11 @@ from mysql.connector import Error
 from llama_index.core import Document, VectorStoreIndex, Settings
 from llama_index.llms.gemini import Gemini
 from llama_index.embeddings.gemini import GeminiEmbedding
+import psycopg2
+from psycopg2 import Error
 import pandas as pd
+
+
 
 # Load environment variables
 load_dotenv()
@@ -19,47 +23,63 @@ else:
     st.success("GEMINI_API_KEY is set")
 
 # Database configuration
-config = {
-    'user': os.getenv('DB_USER'),
-    'password': os.getenv('DB_PASSWORD'),
-    'host': os.getenv('DB_HOST'),
-    'database': os.getenv('DB_NAME'),
-    'port':os.getenv("DB_PORT")
-}
+
+connection_string = os.getenv('DATABASE_URL')
+
 
 def get_tables():
+    conn = None
     try:
-        conn = mysql.connector.connect(**config)
+        conn = psycopg2.connect(connection_string)
         cursor = conn.cursor()
-        cursor.execute("SHOW TABLES;")
+        cursor.execute("""
+            SELECT table_name 
+            FROM information_schema.tables 
+            WHERE table_schema = 'public'
+        """)
         tables = [table[0] for table in cursor.fetchall()]
         return tables
     except Error as e:
         st.error(f"Error: {e}")
         return []
     finally:
-        if conn.is_connected():
+        if conn:
             cursor.close()
             conn.close()
 
 def get_metadata(table_name):
+    conn = None
     try:
-        conn = mysql.connector.connect(**config)
+        conn = psycopg2.connect(connection_string)
         cursor = conn.cursor()
-        query = f"SHOW FULL COLUMNS FROM `{table_name}`"
+        query = f"""
+            SELECT 
+                column_name, 
+                data_type, 
+                collation_name,
+                is_nullable,
+                column_default,
+                (SELECT pg_catalog.col_description(c.oid, cols.ordinal_position::int)
+                FROM pg_catalog.pg_class c
+                WHERE c.oid = (SELECT ('"' || cols.table_name || '"')::regclass::oid)
+                    AND c.relname = cols.table_name) AS column_comment
+            FROM information_schema.columns cols
+            WHERE table_name = '{table_name}'
+        """
         cursor.execute(query)
         columns = cursor.fetchall()
         metadata = []
         for column in columns:
             metadata.append(f"Field: {column[0]}, Type: {column[1]}, Collation: {column[2]}, "
-                            f"Null: {column[3]}, Key: {column[4]}, Default: {column[5]}, "
-                            f"Extra: {column[6]}, Privileges: {column[7]}, Comment: {column[8]}")
+                            f"Null: {'YES' if column[3] == 'YES' else 'NO'}, "
+                            f"Default: {column[4]}, "
+                            f"Comment: {column[5] or ''}")
         return metadata
     except Error as e:
         st.error(f"Error: {e}")
         return []
     finally:
-        if conn.is_connected():
+        if conn:
             cursor.close()
             conn.close()
 
@@ -72,19 +92,25 @@ def generate_prompt(user_prompt):
     return prompt
 
 def execute_sql_query(query):
+    conn = None
     try:
-        conn = mysql.connector.connect(**config)
+        conn = psycopg2.connect(connection_string)
         cursor = conn.cursor()
         cursor.execute(query)
         results = cursor.fetchall()
-        columns = [col[0] for col in cursor.description]
-        df = pd.DataFrame(results, columns=columns)
-        return df
+        columns = [desc[0] for desc in cursor.description]
+        
+        # Convert results to a list of dictionaries
+        results_list = []
+        for row in results:
+            results_list.append(dict(zip(columns, row)))
+        
+        return results_list
     except Error as e:
         st.error(f"Error executing query: {e}")
         return None
     finally:
-        if conn.is_connected():
+        if conn:
             cursor.close()
             conn.close()
 
@@ -133,6 +159,7 @@ for message in st.session_state.messages:
     with st.chat_message(message["role"]):
         st.markdown(message["content"])
 
+
 if prompt := st.chat_input("What would you like to know about the database?"):
     st.session_state.messages.append({"role": "user", "content": prompt})
     with st.chat_message("user"):
@@ -147,14 +174,19 @@ if prompt := st.chat_input("What would you like to know about the database?"):
         
         st.markdown("Query Results:")
         results = execute_sql_query(generated_sql)
-        if results is not None and not results.empty:
-            st.dataframe(results)
-        elif results is not None and results.empty:
-            st.info("The query returned no results.")
+        if results is not None:
+            if results:
+                df_results = pd.DataFrame(results)
+                st.table(df_results)
+            else:
+                st.info("The query returned no results.")
         else:
             st.error("Failed to execute the query. Please check the SQL syntax or database connection.")
     
-    st.session_state.messages.append({"role": "assistant", "content": f"SQL Query: {generated_sql}\n\nResults: {results.to_string() if results is not None else 'Query execution failed'}"})
+    st.session_state.messages.append({
+        "role": "assistant",
+        "content": f"SQL Query: {generated_sql}\n\nResults:\n{df_results.to_string(index=False) if results else 'No results found.'}"
+    })
 
 st.sidebar.header("Sample Queries")
 
