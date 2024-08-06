@@ -191,7 +191,9 @@ if prompt := st.chat_input("What would you like to know about the database?"):
 st.sidebar.header("Sample Queries")
 
 sample_queries = [
-    "Sales people working in tech companies"
+    "People working in Amazon",
+    "Companies attending events in Singapore",
+    "People working as consultant"
 ]
 
 for i, query in enumerate(sample_queries):
