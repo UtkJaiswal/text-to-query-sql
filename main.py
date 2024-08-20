@@ -18,7 +18,7 @@ else:
     st.success("GEMINI_API_KEY is set")
 
 # Database configuration
-connection_string = "mysql://root:root@localhost:3306/cornea_db"
+connection_string = os.getenv('DATABASE_URL')
 
 # Determine database type
 parsed_url = urllib.parse.urlparse(connection_string)
