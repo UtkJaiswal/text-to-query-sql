@@ -77,3 +77,9 @@ pip install mysql-connector-python
     - `DB_HOST`=`localhost`
 
     - `DB_NAME`=<Name_of_the_database>
+
+### Run the project on Streamlit
+
+```bash
+streamlit run main.py
+```
